@@ -104,7 +104,8 @@ body {
 .device-selector h3,
 .action-builder h3,
 .scenario-editor h3,
-.emulator-panel h3 {
+.emulator-panel h3,
+.app-installer h3 {
   font-size: 16px;
   margin-bottom: 15px;
   color: var(--secondary-color);
@@ -150,6 +151,17 @@ body {
   padding: 10px;
   margin-top: 10px;
   line-height: 1.5;
+}
+
+/* ==================== アプリ管理 ==================== */
+
+.app-installer {
+  margin-bottom: 20px;
+}
+
+.app-installer input[type="file"] {
+  width: 100%;
+  font-size: 12px;
 }
 
 .device-list {

@@ -159,6 +159,95 @@ function EmulatorPanel({ onStarted }) {
   );
 }
 
+// ==================== アプリインストールパネル ====================
+function AppInstaller({ canUse }) {
+  const [file, setFile] = useState(null);
+  const [installing, setInstalling] = useState(false);
+  const [packageName, setPackageName] = useState('');
+  const [launching, setLaunching] = useState(false);
+  const [message, setMessage] = useState('');
+  const fileInputRef = useRef(null);
+
+  const handleInstall = async () => {
+    if (!file) return;
+    setInstalling(true);
+    setMessage('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await axios.post(`${API_BASE}/apps/install`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setMessage(`✅ ${file.name} をインストールしました`);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (error) {
+      setMessage(`❌ インストールに失敗しました: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleLaunch = async () => {
+    if (!packageName) return;
+    setLaunching(true);
+    setMessage('');
+    try {
+      await axios.post(`${API_BASE}/apps/launch?package_name=${encodeURIComponent(packageName)}`);
+      setMessage(`✅ ${packageName} を起動しました`);
+    } catch (error) {
+      setMessage(`❌ 起動に失敗しました: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  return (
+    <div className="app-installer">
+      <h3>アプリ管理</h3>
+
+      <div className="form-group">
+        <label>APKファイル</label>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".apk"
+          onChange={(e) => setFile(e.target.files[0] || null)}
+          disabled={!canUse}
+        />
+      </div>
+      <button
+        onClick={handleInstall}
+        disabled={!canUse || !file || installing}
+        className="btn-refresh"
+      >
+        {installing ? 'インストール中...' : '📦 インストール'}
+      </button>
+
+      <div className="form-group" style={{ marginTop: '12px' }}>
+        <label>パッケージ名を指定して起動</label>
+        <input
+          type="text"
+          value={packageName}
+          onChange={(e) => setPackageName(e.target.value)}
+          placeholder="com.example.app"
+          disabled={!canUse}
+        />
+      </div>
+      <button
+        onClick={handleLaunch}
+        disabled={!canUse || !packageName || launching}
+        className="btn-refresh"
+      >
+        {launching ? '起動中...' : '▶ アプリ起動'}
+      </button>
+
+      {message && <p className="emulator-message">{message}</p>}
+      {!canUse && <p className="no-devices">デバイスを選択してください</p>}
+    </div>
+  );
+}
+
 // ==================== 画面プレビューコンポーネント ====================
 function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
   const [screenshot, setScreenshot] = useState(null);
@@ -687,6 +776,7 @@ function App() {
         <div className="sidebar">
           <EmulatorPanel />
           <DeviceSelector onDeviceSelect={setSelectedDevice} />
+          <AppInstaller canUse={!!selectedDevice} />
           <ActionBuilder selectedElement={selectedElement} onAddAction={handleAddAction} />
         </div>
 

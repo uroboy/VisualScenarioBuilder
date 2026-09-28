@@ -162,6 +162,60 @@ class EmulatorManager:
         return status
 
 
+# ==================== アプリのインストール・起動 ====================
+class AppManager:
+    """APKのインストールとパッケージの起動"""
+
+    @staticmethod
+    def install(serial: str, apk_path: str) -> Dict[str, Any]:
+        """APKを指定デバイスにインストール（既存分は上書き）"""
+        try:
+            result = subprocess.run(
+                [ADB_BIN, '-s', serial, 'install', '-r', apk_path],
+                capture_output=True, text=True, timeout=180
+            )
+            output = ((result.stdout or '') + (result.stderr or '')).strip()
+            return {"success": 'Success' in result.stdout, "output": output}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "output": "インストールがタイムアウトしました"}
+        except Exception as e:
+            logger.error(f"Failed to install app: {e}")
+            return {"success": False, "output": str(e)}
+
+    @staticmethod
+    def launch(serial: str, package_name: str) -> Dict[str, Any]:
+        """パッケージ名を指定してランチャーアクティビティを起動"""
+        try:
+            result = subprocess.run(
+                [
+                    ADB_BIN, '-s', serial, 'shell', 'monkey',
+                    '-p', package_name, '-c', 'android.intent.category.LAUNCHER', '1'
+                ],
+                capture_output=True, text=True, timeout=15
+            )
+            output = ((result.stdout or '') + (result.stderr or '')).strip()
+            return {"success": 'Events injected: 1' in output, "output": output}
+        except Exception as e:
+            logger.error(f"Failed to launch app {package_name}: {e}")
+            return {"success": False, "output": str(e)}
+
+    @staticmethod
+    def list_packages(serial: str) -> List[str]:
+        """インストール済みのサードパーティアプリのパッケージ名一覧"""
+        try:
+            result = subprocess.run(
+                [ADB_BIN, '-s', serial, 'shell', 'pm', 'list', 'packages', '-3'],
+                capture_output=True, text=True, timeout=15
+            )
+            return sorted(
+                line.strip().replace('package:', '')
+                for line in result.stdout.splitlines() if line.strip()
+            )
+        except Exception as e:
+            logger.error(f"Failed to list packages: {e}")
+            return []
+
+
 # ==================== デバイス管理 ====================
 class DeviceManager:
     """ADB デバイス管理"""
@@ -617,6 +671,64 @@ async def save_scenario(scenario: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== アプリのインストール・起動 ====================
+@app.post("/api/apps/install")
+async def install_app(file: UploadFile = File(...)):
+    """APKファイルをアップロードして、現在選択中のデバイスにインストールする"""
+    serial = device_manager.selected_device
+    if not serial:
+        raise HTTPException(status_code=400, detail="No device selected")
+
+    if not file.filename or not file.filename.lower().endswith('.apk'):
+        raise HTTPException(status_code=400, detail="APKファイル（.apk）を指定してください")
+
+    apks_dir = Path("./uploaded_apks")
+    apks_dir.mkdir(exist_ok=True)
+    apk_path = apks_dir / file.filename
+
+    try:
+        async with aiofiles.open(apk_path, 'wb') as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                await f.write(chunk)
+    except Exception as e:
+        logger.error(f"Failed to save uploaded APK: {e}")
+        raise HTTPException(status_code=500, detail=f"ファイルの保存に失敗しました: {e}")
+
+    logger.info(f"Installing APK: {apk_path} -> {serial}")
+    result = AppManager.install(serial, str(apk_path))
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["output"] or "インストールに失敗しました")
+
+    return {"success": True, "filename": file.filename, "output": result["output"]}
+
+
+@app.post("/api/apps/launch")
+async def launch_app(package_name: str):
+    """パッケージ名を指定してアプリを起動する"""
+    serial = device_manager.selected_device
+    if not serial:
+        raise HTTPException(status_code=400, detail="No device selected")
+
+    result = AppManager.launch(serial, package_name)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["output"] or "起動に失敗しました")
+
+    return {"success": True}
+
+
+@app.get("/api/apps")
+async def list_apps():
+    """インストール済み（サードパーティ）アプリのパッケージ名一覧を取得する"""
+    serial = device_manager.selected_device
+    if not serial:
+        raise HTTPException(status_code=400, detail="No device selected")
+
+    return {"packages": AppManager.list_packages(serial)}
+
+
 async def _execute_scenario(run_id: str, serial: str, scenario_name: str, actions: List[Dict[str, Any]]):
     """バックグラウンドでシナリオを1ステップずつ実行し、scenario_runs[run_id] に進捗を書き込む"""
     simulator = tap_simulator_map[serial]
@@ -662,6 +774,17 @@ async def _execute_scenario(run_id: str, serial: str, scenario_name: str, action
 
             elif action_type == 'screenshot':
                 step["success"] = True  # 実際のキャプチャは下の共通処理で行う
+
+            elif action_type == 'switch_app':
+                package_name = action.get('target') or action.get('value')
+                if not package_name:
+                    step["success"] = False
+                    step["message"] = "パッケージ名が指定されていません"
+                else:
+                    result = AppManager.launch(serial, package_name)
+                    step["success"] = result["success"]
+                    if not result["success"]:
+                        step["message"] = result["output"] or "起動に失敗しました"
 
             else:
                 step["success"] = False

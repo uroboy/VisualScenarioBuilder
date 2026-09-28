@@ -56,6 +56,10 @@ logs/
 # Results
 results/
 
+# Uploaded APKs
+uploaded_apks/
+*.apk
+
 # Cache
 .cache/
 .pytest_cache/
