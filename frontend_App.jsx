@@ -160,7 +160,7 @@ function EmulatorPanel({ onStarted }) {
 }
 
 // ==================== 画面プレビューコンポーネント ====================
-function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
+function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
   const [screenshot, setScreenshot] = useState(null);
   const [elements, setElements] = useState([]);
   const [highlightedElement, setHighlightedElement] = useState(null);
@@ -176,6 +176,16 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice]);
+
+  // シナリオ実行中は、ステップが完了するたびに親から渡される画面で更新する
+  useEffect(() => {
+    if (liveUpdate?.screenshot) {
+      setScreenshot(liveUpdate.screenshot);
+      if (liveUpdate.elements) {
+        setElements(liveUpdate.elements);
+      }
+    }
+  }, [liveUpdate]);
 
   // WebSocketの初回接続を待たずに画面を表示できるよう、選択直後に一度だけ通常のHTTPで取得する
   // （WebSocketの接続失敗時のフォールバックにもなる）
@@ -467,7 +477,10 @@ function ScenarioEditor({ actions, onDeleteAction, onExport, onRun, running, run
           <p className="empty-message">アクションが追加されていません</p>
         ) : (
           actions.map((action, index) => (
-            <div key={index} className="action-item">
+            <div
+              key={index}
+              className={`action-item ${running && runResult?.current === index ? 'active' : ''}`}
+            >
               <div className="action-number">{index + 1}</div>
               <div className="action-content">
                 <div className="action-type">{action.type}</div>
@@ -507,9 +520,13 @@ function ScenarioEditor({ actions, onDeleteAction, onExport, onRun, running, run
       </div>
 
       {runResult && (
-        <div className={`run-result ${runResult.success ? 'success' : 'failed'}`}>
+        <div className={`run-result ${
+          runResult.status === 'done' ? (runResult.success ? 'success' : 'failed') : 'running'
+        }`}>
           <p className="run-result-summary">
-            {runResult.success ? '✅ 成功' : '❌ 失敗'}
+            {runResult.status === 'done'
+              ? (runResult.success ? '✅ 成功' : '❌ 失敗')
+              : `⏳ 実行中... (${(runResult.current ?? -1) + 1}/${runResult.total ?? actions.length})`}
             {typeof runResult.execution_time === 'number' && ` (${runResult.execution_time.toFixed(1)}s)`}
           </p>
           {runResult.error && <p className="run-result-error">{runResult.error}</p>}
@@ -536,6 +553,7 @@ function App() {
   const [actions, setActions] = useState([]);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
+  const [liveUpdate, setLiveUpdate] = useState(null);
 
   const handleAddAction = (action) => {
     setActions([...actions, action]);
@@ -547,15 +565,33 @@ function App() {
 
   const handleRunScenario = async (scenarioName, scenarioActions) => {
     setRunning(true);
-    setRunResult(null);
+    setRunResult({ status: 'running', current: -1, total: scenarioActions.length, steps: [] });
     try {
-      const response = await axios.post(`${API_BASE}/scenario/run`, {
+      const startResponse = await axios.post(`${API_BASE}/scenario/run`, {
         name: scenarioName,
         actions: scenarioActions,
       });
-      setRunResult(response.data);
+      const runId = startResponse.data.run_id;
+
+      // ステップが進むたびにライブスクリーンと結果パネルを更新する
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        const statusResponse = await axios.get(`${API_BASE}/scenario/run/${runId}/status`);
+        const data = statusResponse.data;
+
+        setRunResult(data);
+        if (data.screenshot) {
+          setLiveUpdate({ screenshot: data.screenshot, elements: data.elements });
+        }
+
+        if (data.status === 'done') {
+          break;
+        }
+      }
     } catch (error) {
       setRunResult({
+        status: 'done',
         success: false,
         error: error.response?.data?.detail || error.message,
         steps: [],
@@ -613,6 +649,7 @@ function App() {
             <ScreenPreview
               selectedDevice={selectedDevice}
               onElementClick={setSelectedElement}
+              liveUpdate={liveUpdate}
             />
           ) : (
             <div className="no-device-placeholder">

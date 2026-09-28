@@ -427,6 +427,11 @@ body {
   border-bottom: none;
 }
 
+.action-item.active {
+  background: #eaf6ff;
+  box-shadow: inset 3px 0 0 var(--primary-color);
+}
+
 .action-number {
   min-width: 24px;
   height: 24px;
@@ -534,6 +539,10 @@ body {
 
 .run-result.failed {
   border-left-color: var(--danger-color, #e74c3c);
+}
+
+.run-result.running {
+  border-left-color: var(--primary-color);
 }
 
 .run-result-summary {

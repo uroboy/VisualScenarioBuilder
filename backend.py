@@ -453,6 +453,7 @@ device_manager = DeviceManager()
 emulator_manager = EmulatorManager()
 screen_capture_map: Dict[str, ScreenCapture] = {}
 tap_simulator_map: Dict[str, TapSimulator] = {}
+scenario_runs: Dict[str, Dict[str, Any]] = {}
 
 # ==================== REST API エンドポイント ====================
 
@@ -616,26 +617,12 @@ async def save_scenario(scenario: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/scenario/run")
-async def run_scenario(scenario: Dict[str, Any]):
-    """シナリオを現在選択中のデバイスに対して実行し、結果を記録する"""
-    serial = device_manager.selected_device
-    if not serial:
-        raise HTTPException(status_code=400, detail="No device selected")
-
-    if serial not in tap_simulator_map:
-        tap_simulator_map[serial] = TapSimulator(serial)
-    if serial not in screen_capture_map:
-        screen_capture_map[serial] = ScreenCapture(serial)
+async def _execute_scenario(run_id: str, serial: str, scenario_name: str, actions: List[Dict[str, Any]]):
+    """バックグラウンドでシナリオを1ステップずつ実行し、scenario_runs[run_id] に進捗を書き込む"""
     simulator = tap_simulator_map[serial]
     capture = screen_capture_map[serial]
-
-    scenario_name = scenario.get('name', 'Unnamed Scenario')
-    actions = scenario.get('actions', [])
-    session_id = f"ui_{int(time.time())}"
+    run = scenario_runs[run_id]
     start_time = time.time()
-
-    steps: List[Dict[str, Any]] = []
     error_message: Optional[str] = None
 
     for idx, action in enumerate(actions):
@@ -674,9 +661,7 @@ async def run_scenario(scenario: Dict[str, Any]):
                 step["success"] = True
 
             elif action_type == 'screenshot':
-                result = capture.capture_and_analyze()
-                step["success"] = result.get("success", False)
-                step["screenshot"] = result.get("screenshot")
+                step["success"] = True  # 実際のキャプチャは下の共通処理で行う
 
             else:
                 step["success"] = False
@@ -688,32 +673,80 @@ async def run_scenario(scenario: Dict[str, Any]):
             step["success"] = False
             step["message"] = str(e)
 
-        steps.append(step)
+        # ステップ実行のたびに画面を取得し、進捗としてすぐ参照できるようにする
+        try:
+            shot = capture.capture_and_analyze()
+            if shot.get("success"):
+                step["screenshot"] = shot["screenshot"]
+                run["screenshot"] = shot["screenshot"]
+                run["elements"] = shot.get("elements", [])
+        except Exception as e:
+            logger.error(f"Failed to capture screen after step {idx}: {e}")
+
+        run["steps"].append(step)
+        run["current"] = idx
 
         if not step["success"] and action.get('critical'):
             error_message = f"ステップ{idx + 1}（{action_type}）で失敗したため中断しました"
             break
 
-    passed = len(steps) > 0 and all(s["success"] for s in steps)
+    passed = len(run["steps"]) > 0 and all(s["success"] for s in run["steps"])
     execution_time = time.time() - start_time
 
     result_manager = TestResultManager("./results")
     result_manager.save_test_result(
-        session_id=session_id,
+        session_id=run_id,
         scenario_name=scenario_name,
         passed=passed,
         execution_time=execution_time,
-        context={"steps": steps},
+        context={"steps": run["steps"]},
         error=error_message
     )
 
-    return {
-        "success": passed,
-        "session_id": session_id,
-        "execution_time": execution_time,
-        "steps": steps,
-        "error": error_message
+    run["status"] = "done"
+    run["success"] = passed
+    run["execution_time"] = execution_time
+    run["error"] = error_message
+
+
+@app.post("/api/scenario/run")
+async def run_scenario(scenario: Dict[str, Any]):
+    """シナリオの実行をバックグラウンドで開始する（進捗は /api/scenario/run/{run_id}/status で取得）"""
+    serial = device_manager.selected_device
+    if not serial:
+        raise HTTPException(status_code=400, detail="No device selected")
+
+    if serial not in tap_simulator_map:
+        tap_simulator_map[serial] = TapSimulator(serial)
+    if serial not in screen_capture_map:
+        screen_capture_map[serial] = ScreenCapture(serial)
+
+    scenario_name = scenario.get('name', 'Unnamed Scenario')
+    actions = scenario.get('actions', [])
+    run_id = f"ui_{int(time.time() * 1000)}"
+
+    scenario_runs[run_id] = {
+        "status": "running",
+        "current": -1,
+        "total": len(actions),
+        "steps": [],
+        "screenshot": None,
+        "elements": [],
+        "scenario_name": scenario_name,
     }
+
+    asyncio.create_task(_execute_scenario(run_id, serial, scenario_name, actions))
+
+    return {"run_id": run_id, "status": "running", "total": len(actions)}
+
+
+@app.get("/api/scenario/run/{run_id}/status")
+async def get_scenario_run_status(run_id: str):
+    """実行中/完了したシナリオ実行の進捗を取得する"""
+    run = scenario_runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
 
 
 # ==================== テスト結果レポート ====================
