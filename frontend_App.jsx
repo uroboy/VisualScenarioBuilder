@@ -107,6 +107,20 @@ function EmulatorPanel({ onStarted }) {
       await axios.post(`${API_BASE}/emulator/${selectedAvd}/start`);
       setMessage('起動を開始しました。ブートには数分〜（アクセラレーション無効な環境ではそれ以上）かかります。準備ができたら「デバイス」の更新ボタンで確認してください。');
       if (onStarted) onStarted();
+
+      // 起動直後にクラッシュしていないか確認（環境依存の即死を早期に知らせる）
+      setTimeout(async () => {
+        try {
+          const check = await axios.get(`${API_BASE}/emulator/avds`);
+          const state = check.data.status?.[selectedAvd]?.state;
+          if (state === 'crashed') {
+            setMessage(`起動直後にプロセスが終了しました（終了コード: ${check.data.status[selectedAvd].returncode}）。サーバーのログを確認してください。`);
+          }
+        } catch {
+          // ignore
+        }
+        refreshAvds();
+      }, 3000);
     } catch (error) {
       setMessage(`起動に失敗しました: ${error.response?.data?.detail || error.message}`);
     } finally {
@@ -127,7 +141,9 @@ function EmulatorPanel({ onStarted }) {
             <select value={selectedAvd} onChange={(e) => setSelectedAvd(e.target.value)}>
               {avds.map((name) => (
                 <option key={name} value={name}>
-                  {name} {statusMap[name] === 'running' ? '(起動中)' : ''}
+                  {name}
+                  {statusMap[name]?.state === 'running' && ' (起動中)'}
+                  {statusMap[name]?.state === 'crashed' && ' (クラッシュ)'}
                 </option>
               ))}
             </select>
@@ -154,9 +170,27 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
 
   useEffect(() => {
     if (selectedDevice) {
+      fetchScreenOnce();
       startScreenStream();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice]);
+
+  // WebSocketの初回接続を待たずに画面を表示できるよう、選択直後に一度だけ通常のHTTPで取得する
+  // （WebSocketの接続失敗時のフォールバックにもなる）
+  const fetchScreenOnce = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/screen`);
+      if (response.data.screenshot) {
+        setScreenshot(response.data.screenshot);
+        if (response.data.elements) {
+          setElements(response.data.elements);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch initial screen:', error);
+    }
+  };
 
   const startScreenStream = () => {
     if (wsRef.current) {
@@ -164,7 +198,7 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
     }
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/screen`);
+    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ws/screen`);
 
     ws.onopen = () => {
       console.log('WebSocket connected');

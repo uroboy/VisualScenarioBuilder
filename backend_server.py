@@ -572,7 +572,7 @@ async def get_reports_html():
 
 
 # ==================== WebSocket（リアルタイム更新） ====================
-@app.websocket("/ws/screen")
+@app.websocket("/api/ws/screen")
 async def websocket_screen(websocket: WebSocket):
     """リアルタイム画面ストリーミング"""
     await websocket.accept()

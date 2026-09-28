@@ -80,6 +80,7 @@ def _sdk_tool(*relative_path: str) -> str:
 EMULATOR_BIN = _sdk_tool('emulator', 'emulator')
 AVDMANAGER_BIN = _sdk_tool('cmdline-tools', 'latest', 'bin', 'avdmanager')
 ADB_BIN = shutil.which('adb') or _sdk_tool('platform-tools', 'adb')
+XVFB_RUN_BIN = shutil.which('xvfb-run')
 
 
 # ==================== Android仮想デバイス(AVD)管理 ====================
@@ -107,16 +108,25 @@ class EmulatorManager:
         if existing and existing.poll() is None:
             return {"success": False, "error": f"'{name}' はすでに起動処理中です"}
 
+        cmd = [
+            EMULATOR_BIN, '-avd', name,
+            '-no-window', '-no-audio', '-no-boot-anim',
+            '-gpu', 'swiftshader_indirect',
+            '-accel', 'auto',
+        ]
+        if XVFB_RUN_BIN:
+            # ヘッドレスLinuxではSwiftShaderがX11ライブラリのロードを試みてクラッシュするため、
+            # 仮想ディスプレイ(Xvfb)の下で起動する（-no-window指定でも必要）
+            cmd = [XVFB_RUN_BIN, '-a'] + cmd
+        else:
+            logger.warning("xvfb-run not found - emulator may crash on a headless Linux host without a display")
+
         try:
             proc = subprocess.Popen(
-                [
-                    EMULATOR_BIN, '-avd', name,
-                    '-no-window', '-no-audio', '-no-boot-anim',
-                    '-gpu', 'swiftshader_indirect',
-                    '-accel', 'auto',
-                ],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                start_new_session=True,  # 呼び出し元プロセスのセッション終了に巻き込まれないようにする
             )
             self.processes[name] = proc
             logger.info(f"Starting emulator '{name}' (pid={proc.pid})")
@@ -137,12 +147,18 @@ class EmulatorManager:
             logger.error(f"Failed to stop emulator {serial}: {e}")
             return False
 
-    def process_status(self) -> Dict[str, str]:
-        """起動を試みたAVDプロセスの生死状態"""
-        return {
-            name: ("running" if proc.poll() is None else "exited")
-            for name, proc in self.processes.items()
-        }
+    def process_status(self) -> Dict[str, Dict[str, Any]]:
+        """起動を試みたAVDプロセスの生死状態（終了コードも含める）"""
+        status = {}
+        for name, proc in self.processes.items():
+            returncode = proc.poll()
+            if returncode is None:
+                status[name] = {"state": "running"}
+            elif returncode == 0:
+                status[name] = {"state": "exited", "returncode": returncode}
+            else:
+                status[name] = {"state": "crashed", "returncode": returncode}
+        return status
 
 
 # ==================== デバイス管理 ====================
@@ -638,7 +654,7 @@ async def stop_emulator(serial: str):
 
 
 # ==================== WebSocket（リアルタイム更新） ====================
-@app.websocket("/ws/screen")
+@app.websocket("/api/ws/screen")
 async def websocket_screen(websocket: WebSocket):
     """リアルタイム画面ストリーミング"""
     await websocket.accept()
