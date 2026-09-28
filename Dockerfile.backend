@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     adb \
     libopencv-dev \
     python3-opencv \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Python依存パッケージ
