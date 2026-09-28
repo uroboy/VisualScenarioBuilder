@@ -7,6 +7,8 @@ import asyncio
 import base64
 import json
 import logging
+import os
+import shutil
 import subprocess
 import threading
 from datetime import datetime
@@ -61,6 +63,86 @@ class UIElement:
     bounds: Dict[str, int]  # x1, y1, x2, y2
     clickable: bool
     depth: int
+
+
+# ==================== Android SDK パス解決 ====================
+ANDROID_SDK_ROOT = os.getenv('ANDROID_SDK_ROOT') or os.getenv('ANDROID_HOME') or os.path.expanduser('~/android-sdk')
+
+
+def _sdk_tool(*relative_path: str) -> str:
+    """SDK配下のツールパスを解決。見つからなければPATH上のコマンド名にフォールバック"""
+    candidate = os.path.join(ANDROID_SDK_ROOT, *relative_path)
+    if os.path.exists(candidate):
+        return candidate
+    return shutil.which(relative_path[-1]) or relative_path[-1]
+
+
+EMULATOR_BIN = _sdk_tool('emulator', 'emulator')
+AVDMANAGER_BIN = _sdk_tool('cmdline-tools', 'latest', 'bin', 'avdmanager')
+ADB_BIN = shutil.which('adb') or _sdk_tool('platform-tools', 'adb')
+
+
+# ==================== Android仮想デバイス(AVD)管理 ====================
+class EmulatorManager:
+    """AVDの一覧取得・起動・停止（KVMなど実行環境に依存）"""
+
+    def __init__(self):
+        self.processes: Dict[str, subprocess.Popen] = {}
+
+    def list_avds(self) -> List[str]:
+        """作成済みAVD名の一覧"""
+        try:
+            result = subprocess.run(
+                [EMULATOR_BIN, '-list-avds'],
+                capture_output=True, text=True, timeout=10
+            )
+            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except Exception as e:
+            logger.error(f"Failed to list AVDs: {e}")
+            return []
+
+    def start_avd(self, name: str) -> Dict[str, Any]:
+        """AVDをヘッドレス起動（起動完了はadb devicesで別途確認が必要）"""
+        existing = self.processes.get(name)
+        if existing and existing.poll() is None:
+            return {"success": False, "error": f"'{name}' はすでに起動処理中です"}
+
+        try:
+            proc = subprocess.Popen(
+                [
+                    EMULATOR_BIN, '-avd', name,
+                    '-no-window', '-no-audio', '-no-boot-anim',
+                    '-gpu', 'swiftshader_indirect',
+                    '-accel', 'auto',
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.processes[name] = proc
+            logger.info(f"Starting emulator '{name}' (pid={proc.pid})")
+            return {"success": True, "pid": proc.pid}
+        except FileNotFoundError:
+            logger.error(f"emulator binary not found at {EMULATOR_BIN}")
+            return {"success": False, "error": "emulator コマンドが見つかりません（Android SDKが未インストール）"}
+        except Exception as e:
+            logger.error(f"Failed to start AVD '{name}': {e}")
+            return {"success": False, "error": str(e)}
+
+    def stop(self, serial: str) -> bool:
+        """稼働中のエミュレータをシリアル指定で停止"""
+        try:
+            subprocess.run([ADB_BIN, '-s', serial, 'emu', 'kill'], timeout=5, capture_output=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to stop emulator {serial}: {e}")
+            return False
+
+    def process_status(self) -> Dict[str, str]:
+        """起動を試みたAVDプロセスの生死状態"""
+        return {
+            name: ("running" if proc.poll() is None else "exited")
+            for name, proc in self.processes.items()
+        }
 
 
 # ==================== デバイス管理 ====================
@@ -187,7 +269,6 @@ class ScreenCapture:
         return {
             "success": True,
             "screenshot": f"data:image/png;base64,{screenshot_base64}",
-            "screenshot_bytes": screenshot_bytes,
             "elements": [asdict(elem) for elem in ui_elements],
             "timestamp": datetime.now().isoformat()
         }
@@ -352,6 +433,7 @@ class TapSimulator:
 
 # ==================== グローバルインスタンス ====================
 device_manager = DeviceManager()
+emulator_manager = EmulatorManager()
 screen_capture_map: Dict[str, ScreenCapture] = {}
 tap_simulator_map: Dict[str, TapSimulator] = {}
 
@@ -530,6 +612,29 @@ async def get_reports_html():
     """テスト結果レポート（HTML）を取得"""
     generator = HTMLReportGenerator("./results")
     return generator.render_html()
+
+
+# ==================== Android仮想デバイス(AVD) ====================
+@app.get("/api/emulator/avds")
+async def list_avds():
+    """作成済みAVD一覧"""
+    return {"avds": emulator_manager.list_avds(), "status": emulator_manager.process_status()}
+
+
+@app.post("/api/emulator/{name}/start")
+async def start_emulator(name: str):
+    """AVDをヘッドレスで起動（起動完了までは数分〜要求環境によってはそれ以上かかる）"""
+    result = emulator_manager.start_avd(name)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "起動に失敗しました"))
+    return result
+
+
+@app.post("/api/emulator/stop")
+async def stop_emulator(serial: str):
+    """稼働中のエミュレータを停止"""
+    success = emulator_manager.stop(serial)
+    return {"success": success}
 
 
 # ==================== WebSocket（リアルタイム更新） ====================

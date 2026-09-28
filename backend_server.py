@@ -241,7 +241,6 @@ class ScreenCapture:
         return {
             "success": True,
             "screenshot": f"data:image/png;base64,{screenshot_base64}",
-            "screenshot_bytes": screenshot_bytes,
             "elements": [asdict(elem) for elem in ui_elements],
             "timestamp": datetime.now().isoformat()
         }

@@ -103,7 +103,8 @@ body {
 
 .device-selector h3,
 .action-builder h3,
-.scenario-editor h3 {
+.scenario-editor h3,
+.emulator-panel h3 {
   font-size: 16px;
   margin-bottom: 15px;
   color: var(--secondary-color);
@@ -133,6 +134,22 @@ body {
   color: #7f8c8d;
   font-size: 13px;
   padding: 20px 0;
+}
+
+/* ==================== Android仮想端末 ==================== */
+
+.emulator-panel {
+  margin-bottom: 20px;
+}
+
+.emulator-message {
+  font-size: 12px;
+  color: var(--secondary-color);
+  background: #eef6fb;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 10px;
+  line-height: 1.5;
 }
 
 .device-list {

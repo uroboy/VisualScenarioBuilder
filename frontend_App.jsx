@@ -71,6 +71,78 @@ function DeviceSelector({ onDeviceSelect }) {
   );
 }
 
+// ==================== Android仮想端末(AVD)パネル ====================
+function EmulatorPanel({ onStarted }) {
+  const [avds, setAvds] = useState([]);
+  const [selectedAvd, setSelectedAvd] = useState('');
+  const [statusMap, setStatusMap] = useState({});
+  const [message, setMessage] = useState('');
+  const [starting, setStarting] = useState(false);
+
+  const refreshAvds = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/emulator/avds`);
+      setAvds(response.data.avds);
+      setStatusMap(response.data.status || {});
+      if (!selectedAvd && response.data.avds.length > 0) {
+        setSelectedAvd(response.data.avds[0]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch AVDs:', error);
+    }
+  };
+
+  useEffect(() => {
+    refreshAvds();
+    const interval = setInterval(refreshAvds, 10000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleStart = async () => {
+    if (!selectedAvd) return;
+    setStarting(true);
+    setMessage('');
+    try {
+      await axios.post(`${API_BASE}/emulator/${selectedAvd}/start`);
+      setMessage('起動を開始しました。ブートには数分〜（アクセラレーション無効な環境ではそれ以上）かかります。準備ができたら「デバイス」の更新ボタンで確認してください。');
+      if (onStarted) onStarted();
+    } catch (error) {
+      setMessage(`起動に失敗しました: ${error.response?.data?.detail || error.message}`);
+    } finally {
+      setStarting(false);
+      refreshAvds();
+    }
+  };
+
+  return (
+    <div className="emulator-panel">
+      <h3>Android仮想端末</h3>
+
+      {avds.length === 0 ? (
+        <p className="no-devices">AVDが作成されていません（avdmanagerで作成してください）</p>
+      ) : (
+        <>
+          <div className="form-group">
+            <select value={selectedAvd} onChange={(e) => setSelectedAvd(e.target.value)}>
+              {avds.map((name) => (
+                <option key={name} value={name}>
+                  {name} {statusMap[name] === 'running' ? '(起動中)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button onClick={handleStart} disabled={starting} className="btn-refresh">
+            {starting ? '起動中...' : '▶ 起動'}
+          </button>
+        </>
+      )}
+
+      {message && <p className="emulator-message">{message}</p>}
+    </div>
+  );
+}
+
 // ==================== 画面プレビューコンポーネント ====================
 function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
   const [screenshot, setScreenshot] = useState(null);
@@ -423,6 +495,7 @@ function App() {
 
       <div className="app-container">
         <div className="sidebar">
+          <EmulatorPanel />
           <DeviceSelector onDeviceSelect={setSelectedDevice} />
           <ActionBuilder selectedElement={selectedElement} onAddAction={handleAddAction} />
         </div>
