@@ -1,0 +1,123 @@
+# Multi-App Test Scenario Example
+# 複数アプリ連携 + 画像認証 + Slack連携のシナリオ例
+
+name: "Image Authentication Flow with Slack Integration"
+description: "認証画面で画像認証を行い、Slackで人間のサポートを受けながら進める"
+
+variables:
+  email: "test@example.com"
+  password: "test_password_123"
+  slack_channel: "#test-automation"
+
+actions:
+  # ========== App1: ログイン画面 ==========
+  - type: "switch_app"
+    target: "app1"
+    description: "App1を起動"
+
+  - type: "wait"
+    duration: 2
+
+  - type: "screenshot"
+    image_path: "screen_initial.png"
+
+  # メールアドレス入力
+  - type: "input"
+    target: "com.example.app1:id/email_field"
+    value: "${email}"
+
+  # パスワード入力
+  - type: "input"
+    target: "com.example.app1:id/password_field"
+    value: "${password}"
+
+  # ログインボタンクリック
+  - type: "click"
+    target: "com.example.app1:id/login_button"
+    critical: true
+
+  # 認証画面の読み込み待機
+  - type: "wait"
+    duration: 3
+
+  # ========== 画像認証フロー ==========
+  # 画像認証フィールドのスクリーンショット
+  - type: "screenshot"
+    image_path: "auth_image.png"
+
+  # Slackに画像を通知して人間からのテキスト入力を待つ
+  - type: "human_input"
+    slack_channel: "#test-automation"
+    target: "com.example.app1:id/auth_text_field"
+    description: "画面に表示されている文字を入力してください"
+    timeout: 600  # 10分待機
+
+  # 認証テキストが入力されたと仮定して送信
+  - type: "click"
+    target: "com.example.app1:id/auth_submit_button"
+    critical: true
+
+  # 認証完了待機
+  - type: "wait"
+    duration: 2
+
+  # ========== App2: 認証後の処理 ==========
+  # App1での認証が完了後、App2に切り替え
+  - type: "switch_app"
+    target: "app2"
+
+  - type: "wait"
+    duration: 2
+
+  # App2でのアクション
+  - type: "screenshot"
+    image_path: "app2_screen.png"
+
+  # App2での何らかの操作
+  - type: "click"
+    target: "com.example.app2:id/process_button"
+
+  - type: "wait"
+    duration: 1
+
+  # ========== 成果物のスクリーンショット ==========
+  - type: "screenshot"
+    image_path: "final_result.png"
+
+  # 成功結果をSlackに通知
+  - type: "notify"
+    slack_channel: "#test-automation"
+    message: "✅ テスト完了しました"
+    description: "認証フロー及びApp2での処理が成功しました"
+
+---
+# 別シナリオ: QRコード認証
+name: "QR Code Authentication Flow"
+description: "QRコード認証を用いた別のシナリオ例"
+
+variables:
+  user_id: "user_001"
+
+actions:
+  - type: "switch_app"
+    target: "app1"
+
+  - type: "wait"
+    duration: 2
+
+  # QRコード表示待機
+  - type: "screenshot"
+    image_path: "qr_code.png"
+
+  # QRコードをSlackで表示して、別デバイスでスキャンさせる
+  - type: "human_input"
+    slack_channel: "#test-automation"
+    description: "QRコードをスキャンして、スレッドに確認ボタンを押してください"
+    timeout: 300
+
+  # QRコード認証完了
+  - type: "wait"
+    duration: 1
+
+  - type: "screenshot"
+    image_path: "qr_auth_complete.png"

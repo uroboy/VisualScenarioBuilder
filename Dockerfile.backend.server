@@ -1,0 +1,38 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ===== システムパッケージ =====
+RUN apt-get update && apt-get install -y \
+    android-tools-adb \
+    android-tools-fastboot \
+    libopencv-dev \
+    python3-opencv \
+    tesseract-ocr \
+    libtesseract-dev \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ===== Python 依存 =====
+COPY backend_requirements.txt .
+RUN pip install --no-cache-dir -r backend_requirements.txt
+
+# ===== アプリケーション =====
+COPY backend_server.py .
+
+# ===== ログディレクトリ =====
+RUN mkdir -p /app/logs /app/scenarios /app/results
+
+# ===== ヘルスチェック =====
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# ===== ポート =====
+EXPOSE 8000
+
+# ===== ADB デバイス接続許可 =====
+# --privileged フラグが必要
+
+# ===== 起動 =====
+CMD ["python", "backend_server.py"]

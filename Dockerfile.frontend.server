@@ -1,0 +1,31 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# ===== npm 依存 =====
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# ===== アプリケーション =====
+COPY frontend/src ./src
+COPY frontend/public ./public
+
+# ===== Nginx 設定（本番環境推奨） =====
+FROM nginx:alpine
+
+COPY --from=0 /app/build /usr/share/nginx/html
+
+# NGINX リバースプロキシ設定
+RUN rm /etc/nginx/conf.d/default.conf
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# ===== ポート =====
+EXPOSE 3000
+
+# ===== ヘルスチェック =====
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1
+
+# ===== 起動 =====
+CMD ["nginx", "-g", "daemon off;"]

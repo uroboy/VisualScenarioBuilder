@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  test-framework:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: app-test-framework
+    
+    environment:
+      # Slack設定
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-#test-automation}
+      
+      # デバイス設定
+      DEVICE_ID: ${DEVICE_ID:-}  # 指定しない場合は接続デバイス自動選択
+      
+      # テストシナリオ
+      TEST_SCENARIO: ${TEST_SCENARIO:-test_scenario_example.yaml}
+      
+      # ロギング
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    
+    volumes:
+      # USB デバイス接続
+      - /dev/bus/usb:/dev/bus/usb
+      
+      # テストシナリオ
+      - ./scenarios:/app/scenarios
+      - ./test_scenario_example.yaml:/app/test_scenario_example.yaml
+      
+      # 出力ディレクトリ
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+      - ./results:/app/results
+    
+    # ネットワークモード：ホストモードを使用（ADB接続用）
+    network_mode: "host"
+    
+    # 特権モード（USB デバイスアクセス用）
+    privileged: true
+    
+    # リソース制限
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    
+    # 再起動ポリシー
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+    
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # オプション: Redis（キャッシュ/セッション管理用）
+  redis:
+    image: redis:7-alpine
+    container_name: test-framework-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+    name: test-framework-network

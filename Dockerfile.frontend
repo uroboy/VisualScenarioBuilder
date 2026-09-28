@@ -1,0 +1,18 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# 依存パッケージ
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# ソースコード
+COPY src ./src
+COPY public ./public
+
+# ポート
+EXPOSE 3000
+
+# 開発サーバー起動
+ENV REACT_APP_API_URL=http://localhost:8000/api
+CMD ["npm", "start"]

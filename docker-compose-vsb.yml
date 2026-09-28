@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # FastAPI バックエンド
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: vsb-backend
+    
+    environment:
+      LOG_LEVEL: INFO
+    
+    ports:
+      - "8000:8000"
+    
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - ./scenarios:/app/scenarios
+      - ./logs:/app/logs
+    
+    network_mode: "host"
+    privileged: true
+    
+    command: uvicorn backend:app --host 0.0.0.0 --port 8000 --reload
+    
+    depends_on:
+      - adb-server
+  
+  # React フロントエンド
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vsb-frontend
+    
+    ports:
+      - "3000:3000"
+    
+    environment:
+      REACT_APP_API_URL: http://localhost:8000/api
+    
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    
+    depends_on:
+      - backend
+    
+    command: npm start
+  
+  # ADB サーバー（オプション）
+  adb-server:
+    image: alpine:latest
+    container_name: vsb-adb-server
+    
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    
+    privileged: true
+    network_mode: "host"
+    
+    command: sh -c "apk add --no-cache android-tools && adb start-server && sleep infinity"
+    
+    profiles:
+      - optional  # docker-compose --profile optional up で起動
+
+networks:
+  default:
+    name: vsb-network

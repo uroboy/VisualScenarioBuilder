@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # FastAPI バックエンド
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: vsb-backend
+    
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ADB_HOST: ${ADB_HOST:-localhost}
+      ADB_PORT: ${ADB_PORT:-5037}
+    
+    # リモートアクセス対応：0.0.0.0 にバインド
+    ports:
+      - "0.0.0.0:8000:8000"
+    
+    volumes:
+      # USB デバイス接続（ローカルのみ）
+      - /dev/bus/usb:/dev/bus/usb
+      # 共有ボリューム
+      - ./scenarios:/app/scenarios
+      - ./logs:/app/logs
+      - ./results:/app/results
+    
+    # ローカルの場合：ホストネットワークモード
+    # リモートの場合：デフォルトネットワーク
+    # network_mode: "host"  # コメントアウト
+    
+    privileged: true
+    
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    depends_on:
+      - adb-socket-forwarder
+  
+  # React フロントエンド
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vsb-frontend
+    
+    environment:
+      # API URLをサーバURLに変更
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000/api}
+      # タイムアウト設定
+      DANGEROUSLY_DISABLE_HOST_CHECK: "true"
+    
+    # リモートアクセス対応：0.0.0.0 にバインド
+    ports:
+      - "0.0.0.0:3000:3000"
+    
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    
+    depends_on:
+      - backend
+  
+  # ADB ソケットフォワーダー
+  # リモートadb接続を別のマシンからサポート
+  adb-socket-forwarder:
+    image: alpine:latest
+    container_name: vsb-adb-forwarder
+    
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    
+    privileged: true
+    
+    # リモートadb接続用ポート公開
+    ports:
+      - "0.0.0.0:5037:5037"
+    
+    environment:
+      ADB_PORT: 5037
+    
+    command: sh -c "
+      apk add --no-cache android-tools &&
+      adb start-server &&
+      echo 'ADB daemon started on 0.0.0.0:5037' &&
+      sleep infinity
+    "
+    
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+    
+    profiles:
+      - with-adb  # docker-compose --profile with-adb up で起動
+
+networks:
+  default:
+    name: vsb-network
+    driver: bridge
