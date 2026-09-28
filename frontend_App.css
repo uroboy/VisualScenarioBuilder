@@ -485,7 +485,14 @@ body {
   background: #f5b7b1;
 }
 
-.btn-export {
+.scenario-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-export,
+.btn-run {
   width: 100%;
   padding: 10px;
   background: var(--primary-color);
@@ -498,13 +505,66 @@ body {
   transition: background 0.3s;
 }
 
+.btn-run {
+  background: var(--success-color);
+}
+
 .btn-export:hover:not(:disabled) {
   background: #2a8fc9;
 }
 
-.btn-export:disabled {
+.btn-run:hover:not(:disabled) {
+  background: #219150;
+}
+
+.btn-export:disabled,
+.btn-run:disabled {
   background: #bdc3c7;
   cursor: not-allowed;
+}
+
+.run-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #f4f6f7;
+  border-left: 4px solid var(--success-color);
+}
+
+.run-result.failed {
+  border-left-color: var(--danger-color, #e74c3c);
+}
+
+.run-result-summary {
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.run-result-error {
+  color: var(--danger-color, #e74c3c);
+  margin: 0 0 6px;
+}
+
+.run-result-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.run-result-steps li {
+  padding: 3px 0;
+  border-bottom: 1px solid #e5e8ea;
+}
+
+.run-result-steps li.ok {
+  color: var(--success-color);
+}
+
+.run-result-steps li.ng {
+  color: var(--danger-color, #e74c3c);
 }
 
 /* ==================== デバイス未選択時のプレースホルダー ==================== */

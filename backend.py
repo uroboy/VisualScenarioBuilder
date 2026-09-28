@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -613,6 +614,106 @@ async def save_scenario(scenario: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Failed to save scenario: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scenario/run")
+async def run_scenario(scenario: Dict[str, Any]):
+    """シナリオを現在選択中のデバイスに対して実行し、結果を記録する"""
+    serial = device_manager.selected_device
+    if not serial:
+        raise HTTPException(status_code=400, detail="No device selected")
+
+    if serial not in tap_simulator_map:
+        tap_simulator_map[serial] = TapSimulator(serial)
+    if serial not in screen_capture_map:
+        screen_capture_map[serial] = ScreenCapture(serial)
+    simulator = tap_simulator_map[serial]
+    capture = screen_capture_map[serial]
+
+    scenario_name = scenario.get('name', 'Unnamed Scenario')
+    actions = scenario.get('actions', [])
+    session_id = f"ui_{int(time.time())}"
+    start_time = time.time()
+
+    steps: List[Dict[str, Any]] = []
+    error_message: Optional[str] = None
+
+    for idx, action in enumerate(actions):
+        action_type = action.get('type')
+        step: Dict[str, Any] = {"index": idx, "type": action_type}
+
+        try:
+            if action_type == 'click':
+                x, y = action.get('x'), action.get('y')
+                if x is None or y is None:
+                    step["success"] = False
+                    step["message"] = "座標情報がありません（要素をクリックして追加したアクションのみ実行できます）"
+                else:
+                    step["success"] = simulator.tap(int(x), int(y))
+
+            elif action_type == 'input':
+                x, y = action.get('x'), action.get('y')
+                if x is not None and y is not None:
+                    simulator.tap(int(x), int(y))
+                    await asyncio.sleep(0.3)
+                step["success"] = simulator.input_text(action.get('value') or '')
+
+            elif action_type == 'swipe':
+                required = ['x1', 'y1', 'x2', 'y2']
+                if any(action.get(k) is None for k in required):
+                    step["success"] = False
+                    step["message"] = "スワイプ座標情報がありません"
+                else:
+                    step["success"] = simulator.swipe(
+                        int(action['x1']), int(action['y1']),
+                        int(action['x2']), int(action['y2'])
+                    )
+
+            elif action_type == 'wait':
+                await asyncio.sleep(float(action.get('duration') or 1))
+                step["success"] = True
+
+            elif action_type == 'screenshot':
+                result = capture.capture_and_analyze()
+                step["success"] = result.get("success", False)
+                step["screenshot"] = result.get("screenshot")
+
+            else:
+                step["success"] = False
+                step["message"] = f"このアプリでは未対応のアクションタイプです: {action_type}"
+
+            await asyncio.sleep(0.3)  # アクション間の待機
+
+        except Exception as e:
+            step["success"] = False
+            step["message"] = str(e)
+
+        steps.append(step)
+
+        if not step["success"] and action.get('critical'):
+            error_message = f"ステップ{idx + 1}（{action_type}）で失敗したため中断しました"
+            break
+
+    passed = len(steps) > 0 and all(s["success"] for s in steps)
+    execution_time = time.time() - start_time
+
+    result_manager = TestResultManager("./results")
+    result_manager.save_test_result(
+        session_id=session_id,
+        scenario_name=scenario_name,
+        passed=passed,
+        execution_time=execution_time,
+        context={"steps": steps},
+        error=error_message
+    )
+
+    return {
+        "success": passed,
+        "session_id": session_id,
+        "execution_time": execution_time,
+        "steps": steps,
+        "error": error_message
+    }
 
 
 # ==================== テスト結果レポート ====================

@@ -372,6 +372,12 @@ function ActionBuilder({ selectedElement, onAddAction }) {
       timestamp: new Date().toISOString()
     };
 
+    // 実行時に再度タップできるよう、選択時点の座標（要素中心）を記録しておく
+    if (selectedElement?.bounds) {
+      action.x = Math.round((selectedElement.bounds.x1 + selectedElement.bounds.x2) / 2);
+      action.y = Math.round((selectedElement.bounds.y1 + selectedElement.bounds.y2) / 2);
+    }
+
     onAddAction(action);
     setInputValue('');
   };
@@ -440,7 +446,7 @@ function ActionBuilder({ selectedElement, onAddAction }) {
 }
 
 // ==================== シナリオエディタコンポーネント ====================
-function ScenarioEditor({ actions, onDeleteAction, onExport }) {
+function ScenarioEditor({ actions, onDeleteAction, onExport, onRun, running, runResult, canRun }) {
   const [scenarioName, setScenarioName] = useState('My Scenario');
 
   return (
@@ -482,13 +488,43 @@ function ScenarioEditor({ actions, onDeleteAction, onExport }) {
         )}
       </div>
 
-      <button
-        onClick={() => onExport(scenarioName, actions)}
-        disabled={actions.length === 0}
-        className="btn-export"
-      >
-        📥 YAML エクスポート
-      </button>
+      <div className="scenario-buttons">
+        <button
+          onClick={() => onRun(scenarioName, actions)}
+          disabled={actions.length === 0 || running || !canRun}
+          className="btn-run"
+          title={!canRun ? 'デバイスを選択してください' : ''}
+        >
+          {running ? '実行中...' : '▶ シナリオ実行'}
+        </button>
+        <button
+          onClick={() => onExport(scenarioName, actions)}
+          disabled={actions.length === 0}
+          className="btn-export"
+        >
+          📥 YAML エクスポート
+        </button>
+      </div>
+
+      {runResult && (
+        <div className={`run-result ${runResult.success ? 'success' : 'failed'}`}>
+          <p className="run-result-summary">
+            {runResult.success ? '✅ 成功' : '❌ 失敗'}
+            {typeof runResult.execution_time === 'number' && ` (${runResult.execution_time.toFixed(1)}s)`}
+          </p>
+          {runResult.error && <p className="run-result-error">{runResult.error}</p>}
+          {runResult.steps && runResult.steps.length > 0 && (
+            <ul className="run-result-steps">
+              {runResult.steps.map((step) => (
+                <li key={step.index} className={step.success ? 'ok' : 'ng'}>
+                  {step.success ? '✓' : '✗'} #{step.index + 1} {step.type}
+                  {step.message && ` — ${step.message}`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -498,6 +534,8 @@ function App() {
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [selectedElement, setSelectedElement] = useState(null);
   const [actions, setActions] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null);
 
   const handleAddAction = (action) => {
     setActions([...actions, action]);
@@ -505,6 +543,26 @@ function App() {
 
   const handleDeleteAction = (index) => {
     setActions(actions.filter((_, i) => i !== index));
+  };
+
+  const handleRunScenario = async (scenarioName, scenarioActions) => {
+    setRunning(true);
+    setRunResult(null);
+    try {
+      const response = await axios.post(`${API_BASE}/scenario/run`, {
+        name: scenarioName,
+        actions: scenarioActions,
+      });
+      setRunResult(response.data);
+    } catch (error) {
+      setRunResult({
+        success: false,
+        error: error.response?.data?.detail || error.message,
+        steps: [],
+      });
+    } finally {
+      setRunning(false);
+    }
   };
 
   const handleExport = async (scenarioName, actions) => {
@@ -568,6 +626,10 @@ function App() {
             actions={actions}
             onDeleteAction={handleDeleteAction}
             onExport={handleExport}
+            onRun={handleRunScenario}
+            running={running}
+            runResult={runResult}
+            canRun={!!selectedDevice}
           />
         </div>
       </div>
