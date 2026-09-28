@@ -264,8 +264,8 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
+  /* 実際のwidth/heightはJS側で画像の表示サイズに同期して設定する
+     （position:absolute要素へのheight:100%はauto高さの親に対して解決できないため） */
   cursor: crosshair;
 }
 

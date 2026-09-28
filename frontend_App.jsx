@@ -167,6 +167,7 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef(null);
+  const imgRef = useRef(null);
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -248,15 +249,27 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
     const x = Math.round((e.clientX - rect.left) * (naturalSize.width / rect.width));
     const y = Math.round((e.clientY - rect.top) * (naturalSize.height / rect.height));
 
-    // タップ検出の可視化
-    const clickedElement = elements.find((elem) => {
-      return x >= elem.bounds.x1 && x <= elem.bounds.x2 &&
-             y >= elem.bounds.y1 && y <= elem.bounds.y2;
-    });
+    // クリック位置を含む要素すべてを対象に、最も具体的な（クリック可能かつ面積が小さい）ものを選ぶ。
+    // UI Automatorのダンプは親→子の順で並ぶため、単純な find() だと画面全体を覆う
+    // 親コンテナが先に一致してしまい、実際にタップした要素を検出できない。
+    const area = (b) => Math.max(0, b.x2 - b.x1) * Math.max(0, b.y2 - b.y1);
+    const matches = elements.filter((elem) => (
+      x >= elem.bounds.x1 && x <= elem.bounds.x2 &&
+      y >= elem.bounds.y1 && y <= elem.bounds.y2
+    ));
+    const clickableMatches = matches.filter((elem) => elem.clickable);
+    const candidates = clickableMatches.length > 0 ? clickableMatches : matches;
+    const clickedElement = candidates.length > 0
+      ? candidates.reduce((best, elem) => (area(elem.bounds) < area(best.bounds) ? elem : best))
+      : null;
 
     if (clickedElement) {
       setHighlightedElement(clickedElement.id);
       onElementClick(clickedElement);
+    } else {
+      // 認識された要素がない座標（WebView/Canvas等）でも、座標ベースでアクションを追加できるようにする
+      setHighlightedElement(null);
+      onElementClick({ isCoordinate: true, x, y, resource_id: null, text: null, class_name: null, clickable: true });
     }
 
     // タップ実行
@@ -304,14 +317,35 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
     });
   };
 
-  // elements/ハイライト状態が変わるたびにオーバーレイを再描画
+  // elements/ハイライト状態が変わるたびにオーバーレイを再描画。
+  // canvasのCSSサイズは、position:absoluteな要素に対する height:100% がauto高さの
+  // 親要素に対して正しく解決されない（画像の実際の表示サイズとズレる）ため、
+  // 画像の実表示サイズ(clientWidth/clientHeight)に毎回明示的に同期させる。
   useEffect(() => {
     const canvas = canvasRef.current;
+    const img = imgRef.current;
     if (!canvas) return;
+    if (img && img.clientWidth && img.clientHeight) {
+      canvas.style.width = `${img.clientWidth}px`;
+      canvas.style.height = `${img.clientHeight}px`;
+    }
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawElements(ctx);
   });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      const img = imgRef.current;
+      if (canvas && img && img.clientWidth && img.clientHeight) {
+        canvas.style.width = `${img.clientWidth}px`;
+        canvas.style.height = `${img.clientHeight}px`;
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <div className="screen-preview">
@@ -327,6 +361,7 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap, liveUpdate }) {
         {screenshot ? (
           <div className="canvas-wrapper">
             <img
+              ref={imgRef}
               src={screenshot}
               alt="device screen"
               className="screenshot-image"
@@ -382,10 +417,14 @@ function ActionBuilder({ selectedElement, onAddAction }) {
       timestamp: new Date().toISOString()
     };
 
-    // 実行時に再度タップできるよう、選択時点の座標（要素中心）を記録しておく
+    // 実行時に再度タップできるよう、選択時点の座標を記録しておく
+    // （認識された要素なら中心座標、未認識の座標クリックならその座標そのもの）
     if (selectedElement?.bounds) {
       action.x = Math.round((selectedElement.bounds.x1 + selectedElement.bounds.x2) / 2);
       action.y = Math.round((selectedElement.bounds.y1 + selectedElement.bounds.y2) / 2);
+    } else if (selectedElement?.isCoordinate) {
+      action.x = selectedElement.x;
+      action.y = selectedElement.y;
     }
 
     onAddAction(action);
@@ -436,11 +475,15 @@ function ActionBuilder({ selectedElement, onAddAction }) {
 
       {selectedElement ? (
         <div className="selected-element-info">
-          <p>対象要素: <strong>{selectedElement.resource_id || selectedElement.text}</strong></p>
+          <p>対象要素: <strong>
+            {selectedElement.isCoordinate
+              ? `座標 (${selectedElement.x}, ${selectedElement.y})`
+              : (selectedElement.resource_id || selectedElement.text || '(名前なし要素)')}
+          </strong></p>
         </div>
       ) : (
         <div className="no-element-info">
-          <p>画面内の要素をクリックして選択</p>
+          <p>画面内をクリックして選択（要素が認識されない場所も座標として選択できます）</p>
         </div>
       )}
 
@@ -486,6 +529,9 @@ function ScenarioEditor({ actions, onDeleteAction, onExport, onRun, running, run
                 <div className="action-type">{action.type}</div>
                 <div className="action-details">
                   {action.target && <span>{action.target}</span>}
+                  {!action.target && action.x !== undefined && action.y !== undefined && (
+                    <span>({action.x}, {action.y})</span>
+                  )}
                   {action.value && <span>{action.value}</span>}
                   {action.duration && <span>{action.duration}s</span>}
                 </div>
