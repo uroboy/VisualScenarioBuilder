@@ -17,12 +17,15 @@ from dataclasses import dataclass, asdict
 
 from fastapi import FastAPI, WebSocket, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 import aiofiles
 import cv2
 import numpy as np
 from PIL import Image
 import xml.etree.ElementTree as ET
+
+from test_utils import TestResultManager
+from report_generator import HTMLReportGenerator
 
 # ==================== 環境変数 ====================
 ADB_HOST = os.getenv('ADB_HOST', 'localhost')
@@ -31,6 +34,7 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 API_HOST = os.getenv('API_HOST', '0.0.0.0')
 API_PORT = int(os.getenv('API_PORT', '8000'))
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+RESULTS_DIR = os.getenv('RESULTS_DIR', './results')
 
 # ==================== ロギング ====================
 logging.basicConfig(
@@ -551,6 +555,21 @@ async def save_scenario(scenario: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Failed to save scenario: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== テスト結果レポート ====================
+@app.get("/api/reports/summary")
+async def get_reports_summary():
+    """テスト結果のサマリー（JSON）を取得"""
+    result_manager = TestResultManager(RESULTS_DIR)
+    return result_manager.generate_summary_report()
+
+
+@app.get("/api/reports/html", response_class=HTMLResponse)
+async def get_reports_html():
+    """テスト結果レポート（HTML）を取得"""
+    generator = HTMLReportGenerator(RESULTS_DIR)
+    return generator.render_html()
 
 
 # ==================== WebSocket（リアルタイム更新） ====================

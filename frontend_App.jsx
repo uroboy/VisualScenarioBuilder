@@ -408,6 +408,14 @@ function App() {
       <header className="app-header">
         <h1>Visual Scenario Builder</h1>
         <p>Androidアプリの自動テストシナリオをビジュアルで構築</p>
+        <a
+          href={`${API_BASE}/reports/html`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-report"
+        >
+          📊 テストレポート
+        </a>
       </header>
 
       <div className="app-container">

@@ -19,7 +19,7 @@ COPY backend_requirements.txt .
 RUN pip install --no-cache-dir -r backend_requirements.txt
 
 # ===== アプリケーション =====
-COPY backend_server.py .
+COPY backend_server.py test_utils.py report_generator.py ./
 
 # ===== ログディレクトリ =====
 RUN mkdir -p /app/logs /app/scenarios /app/results

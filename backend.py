@@ -16,12 +16,15 @@ from dataclasses import dataclass, asdict
 
 from fastapi import FastAPI, WebSocket, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 import aiofiles
 import cv2
 import numpy as np
 from PIL import Image
 import xml.etree.ElementTree as ET
+
+from test_utils import TestResultManager
+from report_generator import HTMLReportGenerator
 
 # ==================== ロギング ====================
 logging.basicConfig(level=logging.INFO)
@@ -512,6 +515,21 @@ async def save_scenario(scenario: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Failed to save scenario: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== テスト結果レポート ====================
+@app.get("/api/reports/summary")
+async def get_reports_summary():
+    """テスト結果のサマリー（JSON）を取得"""
+    result_manager = TestResultManager("./results")
+    return result_manager.generate_summary_report()
+
+
+@app.get("/api/reports/html", response_class=HTMLResponse)
+async def get_reports_html():
+    """テスト結果レポート（HTML）を取得"""
+    generator = HTMLReportGenerator("./results")
+    return generator.render_html()
 
 
 # ==================== WebSocket（リアルタイム更新） ====================

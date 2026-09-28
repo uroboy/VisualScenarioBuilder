@@ -54,9 +54,18 @@ class TestResultManager:
         for result_file in search_dir.glob("*_result.json"):
             with open(result_file, 'r') as f:
                 results.append(json.load(f))
-        
+
+        results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+
         if not results:
-            return {"total": 0, "passed": 0, "failed": 0, "summary": []}
+            return {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "pass_rate": 0.0,
+                "average_execution_time": 0.0,
+                "results": []
+            }
         
         summary = {
             "total": len(results),

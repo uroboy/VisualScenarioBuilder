@@ -20,6 +20,8 @@ import pytesseract
 from PIL import Image
 import yaml
 
+from test_utils import TestResultManager
+
 
 # ==================== ロギング設定 ====================
 logging.basicConfig(
@@ -270,46 +272,69 @@ class ImageRecognition:
 class TestExecutionEngine:
     """テスト実行のメインエンジン"""
     
-    def __init__(self, 
+    def __init__(self,
                  ui_engine: UIAutomationEngine,
                  slack: SlackIntegration,
-                 device_config: Dict[str, str]):
+                 device_config: Dict[str, str],
+                 result_manager: Optional[TestResultManager] = None):
         self.ui = ui_engine
         self.slack = slack
         self.device_config = device_config  # アプリパッケージ名のマッピング
         self.context: Optional[TestContext] = None
-    
-    async def execute_scenario(self, 
+        self.result_manager = result_manager or TestResultManager()
+
+    async def execute_scenario(self,
                                scenario_path: str,
                                session_id: str) -> bool:
-        """シナリオをYAMLから読み込んで実行"""
+        """シナリオをYAMLから読み込んで実行し、結果を記録する"""
         self.context = TestContext(session_id=session_id)
-        
+        start_time = time.time()
+        scenario_name = scenario_path
+        passed = False
+        error_message: Optional[str] = None
+
         try:
             with open(scenario_path, 'r', encoding='utf-8') as f:
                 scenario = yaml.safe_load(f)
-            
-            logger.info(f"Starting scenario: {scenario.get('name')}")
+
+            scenario_name = scenario.get('name', scenario_path)
+            logger.info(f"Starting scenario: {scenario_name}")
             actions = scenario.get('actions', [])
-            
+
             for idx, action_def in enumerate(actions):
                 logger.info(f"Executing action {idx + 1}/{len(actions)}: {action_def}")
-                
+
                 action = self._parse_action(action_def)
                 success = await self._execute_action(action)
-                
+
                 if not success and action_def.get('critical', False):
-                    logger.error(f"Critical action failed, aborting")
+                    error_message = f"Critical action failed at step {idx + 1}: {action_def.get('type')}"
+                    logger.error(error_message)
                     return False
-                
+
                 time.sleep(0.5)  # アクション間の待機
-            
+
             logger.info("Scenario completed successfully")
+            passed = True
             return True
-        
+
         except Exception as e:
+            error_message = str(e)
             logger.error(f"Scenario execution failed: {e}")
             return False
+
+        finally:
+            self.result_manager.save_test_result(
+                session_id=session_id,
+                scenario_name=scenario_name,
+                passed=passed,
+                execution_time=time.time() - start_time,
+                context={
+                    "current_app": self.context.current_app,
+                    "captured_values": self.context.captured_values
+                },
+                error=error_message
+            )
     
     def _parse_action(self, action_def: Dict[str, Any]) -> TestAction:
         """辞書からTestActionを生成"""
@@ -438,34 +463,42 @@ class TestExecutionEngine:
 
 # ==================== メイン実行 ====================
 async def main():
-    """使用例"""
+    """CLIエントリーポイント"""
+    import argparse
     import os
-    
+
+    parser = argparse.ArgumentParser(description="Multi-App Test Orchestrator")
+    parser.add_argument('--scenario', default='test_scenario.yaml', help="実行するシナリオYAMLファイル")
+    parser.add_argument('--session-id', default=None, help="セッションID（省略時は自動生成）")
+    args = parser.parse_args()
+
+    session_id = args.session_id or f"test_{int(time.time())}"
+
     # 環境変数から取得
     SLACK_TOKEN = os.getenv('SLACK_BOT_TOKEN')
     SLACK_CHANNEL = os.getenv('SLACK_CHANNEL', '#test-automation')
-    
+
     if not SLACK_TOKEN:
         logger.error("SLACK_BOT_TOKEN environment variable not set")
         return
-    
+
     # エンジン初期化
     ui_engine = UIAutomationEngine()
     slack = SlackIntegration(SLACK_TOKEN, SLACK_CHANNEL)
-    
+
     device_config = {
         "app1": "com.example.app1",
         "app2": "com.example.app2"
     }
-    
+
     executor = TestExecutionEngine(ui_engine, slack, device_config)
-    
-    # シナリオ実行
+
+    # シナリオ実行（結果は results/ 配下にJSONで自動保存される）
     success = await executor.execute_scenario(
-        scenario_path='test_scenario.yaml',
-        session_id='test_001'
+        scenario_path=args.scenario,
+        session_id=session_id
     )
-    
+
     print(f"Test result: {'PASSED' if success else 'FAILED'}")
 
 
