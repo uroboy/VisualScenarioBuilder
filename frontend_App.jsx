@@ -7,7 +7,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE = 'http://localhost:8000/api';
+// 相対パスにすることで、CRAの開発プロキシ（package.jsonの"proxy"設定）経由で
+// 常に「フロントエンドを配信しているホスト」のバックエンドに届く（別マシンから
+// アクセスした場合に localhost 固定だと接続できない問題を回避）
+const API_BASE = '/api';
 
 // ==================== デバイス選択コンポーネント ====================
 function DeviceSelector({ onDeviceSelect }) {
