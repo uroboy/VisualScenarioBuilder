@@ -165,6 +165,7 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
   const [elements, setElements] = useState([]);
   const [highlightedElement, setHighlightedElement] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
 
@@ -226,10 +227,16 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
     wsRef.current = ws;
   };
 
+  const handleImageLoad = (e) => {
+    setNaturalSize({ width: e.target.naturalWidth, height: e.target.naturalHeight });
+  };
+
   const handleCanvasClick = async (e) => {
+    if (!naturalSize.width || !naturalSize.height) return;
+
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = Math.round((e.clientX - rect.left) * (1920 / rect.width)); // 画面解像度に合わせる
-    const y = Math.round((e.clientY - rect.top) * (1080 / rect.height));
+    const x = Math.round((e.clientX - rect.left) * (naturalSize.width / rect.width));
+    const y = Math.round((e.clientY - rect.top) * (naturalSize.height / rect.height));
 
     // タップ検出の可視化
     const clickedElement = elements.find((elem) => {
@@ -287,6 +294,15 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
     });
   };
 
+  // elements/ハイライト状態が変わるたびにオーバーレイを再描画
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawElements(ctx);
+  });
+
   return (
     <div className="screen-preview">
       <div className="preview-header">
@@ -304,13 +320,13 @@ function ScreenPreview({ selectedDevice, onElementClick, onTap }) {
               src={screenshot}
               alt="device screen"
               className="screenshot-image"
-              onClick={handleCanvasClick}
+              onLoad={handleImageLoad}
             />
             <canvas
               ref={canvasRef}
               className="element-overlay"
-              width={1920}
-              height={1080}
+              width={naturalSize.width}
+              height={naturalSize.height}
               onClick={handleCanvasClick}
             />
           </div>
